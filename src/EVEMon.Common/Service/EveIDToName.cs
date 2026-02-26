@@ -10,6 +10,7 @@ using EVEMon.Common.Serialization.Eve;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 using StringIDInfo = EVEMon.Common.Service.IDInformation<string, string>;
@@ -29,7 +30,14 @@ namespace EVEMon.Common.Service
         private static readonly GenericIDToNameProvider s_lookup =
             new GenericIDToNameProvider(s_cacheList);
 
+        /// <summary>
+        /// Serializes all file I/O (load and save) to prevent concurrent access to
+        /// EveIDToName.xml which causes IOException due to exclusive file handles.
+        /// </summary>
+        private static readonly SemaphoreSlim s_fileLock = new SemaphoreSlim(1, 1);
+
         private static bool s_savePending;
+        private static bool s_saveRunning;
         private static DateTime s_lastSaveTime;
 
         /// <summary>
@@ -87,14 +95,26 @@ namespace EVEMon.Common.Service
             // Quit if the client has been shut down
             if (EveMonClient.Closed || s_cacheList.Any())
                 return;
-            // Deserialize the file
-            var cache = LocalXmlCache.Load<SerializableEveIDToName>(Filename, true);
-            if (cache != null)
-                // Add the data to the cache
-                Import(cache.Entities.Select(entity => new SerializableCharacterNameListItem {
-                    ID = entity.ID,
-                    Name = entity.Name
-                }));
+
+            // Acquire the file lock synchronously to prevent reading while a save is in progress
+            s_fileLock.Wait();
+            try
+            {
+                // Deserialize the file
+                var cache = LocalXmlCache.Load<SerializableEveIDToName>(Filename, true);
+                if (cache != null)
+                    // Add the data to the cache
+                    Import(cache.Entities.Select(entity => new SerializableCharacterNameListItem
+                    {
+                        ID = entity.ID,
+                        Name = entity.Name
+                    }));
+            }
+            finally
+            {
+                s_fileLock.Release();
+            }
+
             // For blank corporations and alliances
             s_lookup.Prefill(0L, "(None)");
         }
@@ -114,8 +134,8 @@ namespace EVEMon.Common.Service
         /// </summary>
         private static Task UpdateOnOneSecondTickAsync()
         {
-            // Is a save requested and is the last save older than 10s ?
-            if (s_savePending && DateTime.UtcNow > s_lastSaveTime.AddSeconds(10))
+            // Is a save requested, not already running, and is the last save older than 10s?
+            if (s_savePending && !s_saveRunning && DateTime.UtcNow > s_lastSaveTime.AddSeconds(10))
                 return SaveImmediateAsync();
 
             return Task.CompletedTask;
@@ -126,12 +146,32 @@ namespace EVEMon.Common.Service
         /// </summary>
         public static async Task SaveImmediateAsync()
         {
-            // Save in file
-            await LocalXmlCache.SaveAsync(Filename, Util.SerializeToXmlDocument(Export()));
+            // Prevent re-entrant saves (timer tick + shutdown can overlap)
+            if (s_saveRunning)
+                return;
 
-            // Reset savePending flag
-            s_lastSaveTime = DateTime.UtcNow;
-            s_savePending = false;
+            s_saveRunning = true;
+            try
+            {
+                await s_fileLock.WaitAsync().ConfigureAwait(false);
+                try
+                {
+                    // Save in file
+                    await LocalXmlCache.SaveAsync(Filename, Util.SerializeToXmlDocument(Export()));
+
+                    // Reset savePending flag
+                    s_lastSaveTime = DateTime.UtcNow;
+                    s_savePending = false;
+                }
+                finally
+                {
+                    s_fileLock.Release();
+                }
+            }
+            finally
+            {
+                s_saveRunning = false;
+            }
         }
 
         /// <summary>
