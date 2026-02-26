@@ -895,11 +895,17 @@ namespace EVEMon.Common.Models
                 if (!CorporationIndustryJobs.Any(job => job.ActiveJobState ==
                         ActiveJobState.Ready && !job.NotificationSend))
                 {
-                    EveMonClient.Notifications.NotifyCharacterIndustryJobCompletion(this,
-                        m_jobsCompletedForCharacter);
+                    // Snapshot the list before notifying — the notification constructor
+                    // iterates the enumerable, and Clear() below (or another timer tick
+                    // calling AddRange) would modify the list mid-iteration, causing
+                    // IndexOutOfRangeException.
+                    var completedSnapshot = m_jobsCompletedForCharacter.ToList();
 
-                    // Now that we have send the notification clear the list
+                    // Now that we have a snapshot, clear the list before notifying
                     m_jobsCompletedForCharacter.Clear();
+
+                    EveMonClient.Notifications.NotifyCharacterIndustryJobCompletion(this,
+                        completedSnapshot);
                 }
             }
         }
