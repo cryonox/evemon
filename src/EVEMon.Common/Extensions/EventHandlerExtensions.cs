@@ -51,6 +51,12 @@ namespace EVEMon.Common.Extensions
                     {
                         // Control was disposed between BeginInvoke and EndInvoke
                     }
+                    catch (IndexOutOfRangeException) when (sync is Control c && (c.IsDisposed || !c.IsHandleCreated))
+                    {
+                        // Control.EndInvoke throws IndexOutOfRangeException when the
+                        // control's internal async result list is cleared during disposal
+                        // or handle recreation (e.g. resize triggering layout changes).
+                    }
 
                     continue;
                 }
@@ -104,6 +110,12 @@ namespace EVEMon.Common.Extensions
                     catch (ObjectDisposedException)
                     {
                         // Control was disposed between BeginInvoke and EndInvoke
+                    }
+                    catch (IndexOutOfRangeException) when (sync is Control c && (c.IsDisposed || !c.IsHandleCreated))
+                    {
+                        // Control.EndInvoke throws IndexOutOfRangeException when the
+                        // control's internal async result list is cleared during disposal
+                        // or handle recreation (e.g. resize triggering layout changes).
                     }
 
                     continue;
