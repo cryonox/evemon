@@ -3,6 +3,7 @@ using EVEMon.Common.Constants;
 using EVEMon.Common.Data;
 using EVEMon.Common.Enumerations.CCPAPI;
 using EVEMon.Common.Extensions;
+using EVEMon.Common.Helpers;
 using EVEMon.Common.Models;
 using EVEMon.Common.Serialization;
 using EVEMon.Common.Serialization.Esi;
@@ -57,7 +58,14 @@ namespace EVEMon.Common.Service
         /// <param name="e">The <see cref="System.EventArgs"/> instance containing the event data.</param>
         private static async void EveMonClient_TimerTick(object sender, EventArgs e)
         {
-            await UpdateOnOneSecondTickAsync();
+            try
+            {
+                await UpdateOnOneSecondTickAsync();
+            }
+            catch (Exception ex)
+            {
+                ExceptionHandler.LogException(ex, true);
+            }
         }
         
         /// <summary>

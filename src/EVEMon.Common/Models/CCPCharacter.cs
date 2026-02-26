@@ -98,7 +98,8 @@ namespace EVEMon.Common.Models
             EveMonClient.CharacterPlaneteryPinsCompleted += EveMonClient_CharacterPlaneteryPinsCompleted;
             EveMonClient.ESIKeyInfoUpdated += EveMonClient_ESIKeyInfoUpdated;
             EveMonClient.EveIDToNameUpdated += EveMonClient_EveIDToNameUpdated;
-            EveMonClient.TimerTick += EveMonClient_TimerTick;
+            // Note: TimerTick subscription is deferred until data querying starts
+            // to reduce UI thread overhead during startup
         }
 
         /// <summary>
@@ -473,8 +474,8 @@ namespace EVEMon.Common.Models
             // EVE notifications IDs
             EVENotifications.Import(serial.EveNotificationsIDs);
 
-            // Kill Logs
-            KillLog.ImportFromCacheFile();
+            // Kill Logs are loaded lazily on first access to avoid
+            // synchronous file I/O during startup
 
             // Fire the global event
             EveMonClient.OnCharacterUpdated(this);
@@ -758,11 +759,14 @@ namespace EVEMon.Common.Models
             if (!Identity.ESIKeys.Any())
                 return;
 
+            bool needsTimerTick = false;
+
             if (m_characterDataQuerying == null && Identity.ESIKeys.Any())
             {
                 m_characterDataQuerying = new CharacterDataQuerying(this);
                 ResetLastAPIUpdates(m_lastAPIUpdates.Where(lastUpdate => Enum.IsDefined(
                     typeof(ESIAPICharacterMethods), lastUpdate.Method)));
+                needsTimerTick = true;
             }
 
             if (m_corporationDataQuerying == null && Identity.ESIKeys.Any())
@@ -770,7 +774,12 @@ namespace EVEMon.Common.Models
                 m_corporationDataQuerying = new CorporationDataQuerying(this);
                 ResetLastAPIUpdates(m_lastAPIUpdates.Where(lastUpdate => Enum.IsDefined(
                     typeof(ESIAPICorporationMethods), lastUpdate.Method)));
+                needsTimerTick = true;
             }
+
+            // Subscribe to TimerTick only once data querying is active
+            if (needsTimerTick)
+                EveMonClient.TimerTick += EveMonClient_TimerTick;
         }
 
         /// <summary>

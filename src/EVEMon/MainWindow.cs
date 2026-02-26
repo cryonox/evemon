@@ -554,7 +554,9 @@ namespace EVEMon
         /// <returns>A tab page.</returns>
         private static TabPage CreateTabPage(Character character)
         {
-            // Create the tab
+            // Create the tab without the heavy CharacterMonitor control.
+            // The monitor is created lazily when the tab is first selected,
+            // which dramatically speeds up startup with many characters.
             TabPage page;
             TabPage tempPage = null;
             try
@@ -563,9 +565,6 @@ namespace EVEMon
                 tempPage.UseVisualStyleBackColor = true;
                 tempPage.Padding = new Padding(5);
                 tempPage.Tag = character;
-
-                // Create the character monitor
-                CreateCharacterMonitor(character, tempPage);
 
                 page = tempPage;
                 tempPage = null;
@@ -626,6 +625,8 @@ namespace EVEMon
         /// <param name="e"></param>
         private void tcCharacterTabs_SelectedIndexChanged(object sender, EventArgs e)
         {
+            // Ensure the CharacterMonitor is created for the newly selected tab
+            GetCurrentMonitor();
             UpdateControlsOnTabSelectionChange();
         }
 
@@ -669,10 +670,30 @@ namespace EVEMon
         /// <returns></returns>
         private CharacterMonitor GetCurrentMonitor()
         {
-            if (tcCharacterTabs.SelectedTab == null || tcCharacterTabs.SelectedTab.Controls.Count == 0)
+            if (tcCharacterTabs.SelectedTab == null || tcCharacterTabs.SelectedTab == tpOverview)
                 return null;
 
-            return tcCharacterTabs.SelectedTab.Controls[0] as CharacterMonitor;
+            // Lazily create the CharacterMonitor on first access to avoid
+            // creating ~100 controls per character during startup
+            TabPage tab = tcCharacterTabs.SelectedTab;
+            Character character = tab.Tag as Character;
+            if (character == null)
+                return null;
+
+            if (tab.Controls.Count == 0)
+            {
+                CreateCharacterMonitor(character, tab);
+
+                // Force OnVisibleChanged to fire on the newly created monitor so that
+                // all sub-controls (header, body, footer) populate their data.
+                // Without this, the controls miss the initial update because OnLoad
+                // fires before the control is fully visible in the layout.
+                var monitor = tab.Controls[0];
+                monitor.Visible = false;
+                monitor.Visible = true;
+            }
+
+            return tab.Controls[0] as CharacterMonitor;
         }
 
         /// <summary>
@@ -2064,6 +2085,7 @@ namespace EVEMon
 
             // Clear all character monitor notifications
             foreach (CharacterMonitor monitor in tcCharacterTabs.TabPages.Cast<TabPage>()
+                .Where(tabPage => tabPage.Controls.Count > 0)
                 .Select(tabPage => tabPage.Controls[0] as CharacterMonitor))
             {
                 monitor?.ClearNotifications();
